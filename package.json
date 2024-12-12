@@ -1,0 +1,28 @@
+{
+  "name": "mmm-qumagieslideshow",
+  "version": "0.0.1",
+  "description": "Show on MagicMirror² fullscreen slideshow in background from QNAP Qumagie album",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yuri-tceretian/MMM-QumagieSlideshow"
+  },
+  "keywords": [
+    "magicmirror",
+    "background",
+    "slideshow",
+    "QNAP",
+    "Qumagie"
+  ],
+  "author": {
+    "name": "yuri-tceretian",
+    "url": "https://github.com/yuri-tceretian"
+  },
+  "license": "MIT",
+  "dependencies": {},
+	"devDependencies": {
+		"@eslint/js": "^9.10.0",
+		"@stylistic/eslint-plugin": "^2.7.2",
+		"eslint": "^9.10.0",
+		"globals": "^15.9.0"
+	}
+}
