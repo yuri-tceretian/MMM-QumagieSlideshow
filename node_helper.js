@@ -91,15 +91,16 @@ module.exports = NodeHelper.create({
     this.log(Log.debug, `Got ${r.DataList.length} items`)
     const canContine = r.DataList.length === size
     if (this.albumData) {
-      r.DataList = this.albumData.DataList.concat(r.DataList)
+      this.albumData.DataList = this.albumData.DataList.concat(r.DataList)
     } else {
       this.albumData = r
     }
-    if (fn) {
+	  this.log(Log.info, `Got ${r.DataList.length} items. Total: ${this.albumData.DataList.length}`)
+  	if (fn) {
       fn(page)
     }
     if (canContine) {
-      await this.getAlbumDataAll(page + 1, size, r)
+      await this.getAlbumDataAll(page + 1, size, fn)
     }
   },
 
@@ -112,7 +113,7 @@ module.exports = NodeHelper.create({
     this.loading = true
     this.log(Log.info, "Start loading album photos")
     const page = 1
-    const size = 200
+    const size = 1000
     try {
       await this.getAlbumDataAll(page, size, (p) => {
         if (p === 1 && sendNotification) {
