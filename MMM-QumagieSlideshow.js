@@ -16,8 +16,10 @@ Module.register("MMM-QumagieSlideshow", {
   defaults: {
     // TODO
     host: "http://localhost:8080",
+	  // API key of Immich
+	  api_key: "",
     // TODO comment + many albums?
-    albumId: "o7a2qD",
+    albumId: "dc174317-fbad-417f-9fd2-8dce7ea412ac",
     // the speed at which to switch between images, in milliseconds
     slideshowSpeed: 10 * 1000,
     // transition speed from one image to the other, transitionImages must be true
@@ -214,10 +216,10 @@ Module.register("MMM-QumagieSlideshow", {
     wrapper.appendChild(div)
   },
 
-  backgroundSize(imageInfo) {
+  backgroundSize(payload) {
     if (this.config.backgroundSize === "auto") {
-      const w = imageInfo?.fileInfo?.iWidth
-      const h = imageInfo?.fileInfo.iHeight
+      const w = payload?.asset?.exifInfo?.exifImageWidth
+      const h = payload?.asset?.exifInfo?.exifImageHeight
       return h && w && Number(h) < Number(w)
         ? "cover"
         : "contain"
@@ -251,8 +253,8 @@ Module.register("MMM-QumagieSlideshow", {
     wrapper.appendChild(div)
   },
 
-  displayImage(imageinfo) {
-    this.log("displayImage", imageinfo)
+  displayImage(payload) {
+    this.log("displayImage", payload)
     const image = new Image()
     image.onload = () => {
       // check if there are more than 2 elements and remove the first one
@@ -275,7 +277,7 @@ Module.register("MMM-QumagieSlideshow", {
         transitionDiv.style.animationTimingFunction = this.config.transitionTimingFunction
       }
 
-      const imageDiv = this.createDiv(this.backgroundSize(imageinfo))
+      const imageDiv = this.createDiv(this.backgroundSize(payload))
       imageDiv.style.backgroundImage = `url("${image.src}")`
 
       if (this.config.showProgressBar) {
@@ -333,7 +335,7 @@ Module.register("MMM-QumagieSlideshow", {
       this.imagesDiv.appendChild(transitionDiv)
     }
 
-    image.src = imageinfo.url
+    image.src = payload.url
   },
 
   updateImage(backToPreviousImage = false, imageToDisplay = null) {

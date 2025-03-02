@@ -16,6 +16,8 @@ const NodeHelper = require("node_helper")
 const Log = require("../../js/logger.js")
 const querystring = require("querystring")
 const http = require("http")
+const fs = require("fs").promises;
+const path = require("path");
 
 const HISTORY_MAX_SIZE = 10
 
@@ -26,11 +28,22 @@ module.exports = NodeHelper.create({
     Log.info(`QUMAGIESLIDESHOW: ${msg}`, ...params)
   },
   start() {
-    this.loading = false
-    this.albumData = null
-    this.timer = null
-    this.history = []
+	  this.loading = false
+	  this.albumData = null
+	  this.timer = null
+	  this.history = []
+	  this.cacheDir = path.join(__dirname, "cache"); // Cache folder in plugin directory
+	  this.ensureCacheDir();
   },
+
+	// Ensure cache directory exists
+	async ensureCacheDir() {
+		try {
+			await fs.mkdir(this.cacheDir, { recursive: true });
+		} catch (error) {
+			console.error("Error creating cache directory:", error);
+		}
+	},
 
   hasShownBefore(item) {
     return this.history.some(hist => item === hist)
@@ -50,21 +63,21 @@ module.exports = NodeHelper.create({
     return this.history.pop()
   },
 
-  getAlbumDataPaged(page = 1, size = 10) {
+  sendGetRequest(url, callback) {
+	  return http.get(url, {
+		headers: {
+			"x-api-key": this.config.api_key,
+		},
+	  }, callback)
+  },
+
+  getAlbumData() {
     return new Promise((resolve, reject) => {
       const u = new URL(this.config.host)
-      u.pathname = "/qumagie/p/api/list.php"
-      u.search = querystring.stringify({
-        a: this.config.albumId,
-        t: "allMedia",
-        c: size.toString(),
-        p: page.toString(),
-        s: "time",
-        d: "desc"
-      })
+      u.pathname = "/api/albums/" + this.config.albumId
 
       this.log(Log.debug, `Sending GET to ${u.toString()}`)
-      http.get(u.toString(), (response) => {
+      this.sendGetRequest(u.toString(),  (response) => {
         let data = ""
         // A chunk of data has been received.
         response.on("data", (chunk) => {
@@ -85,23 +98,10 @@ module.exports = NodeHelper.create({
     })
   },
 
-  async getAlbumDataAll(page, size, fn) {
-    this.log(Log.debug, `Getting page ${page}`)
-    const r = await this.getAlbumDataPaged(page, size)
-    this.log(Log.debug, `Got ${r.DataList.length} items`)
-    const canContine = r.DataList.length === size
-    if (this.albumData) {
-      this.albumData.DataList = this.albumData.DataList.concat(r.DataList)
-    } else {
-      this.albumData = r
-    }
-	  this.log(Log.info, `Got ${r.DataList.length} items. Total: ${this.albumData.DataList.length}`)
-  	if (fn) {
-      fn(page)
-    }
-    if (canContine) {
-      await this.getAlbumDataAll(page + 1, size, fn)
-    }
+  async getAlbumDataAll() {
+	  this.albumData = await this.getAlbumData()
+	  this.log(Log.info, `Got album ${this.albumData.albumName}. ${this.albumData.assetCount} items.`)
+	  this.getNextImage()
   },
 
   // gathers the image list
@@ -112,17 +112,9 @@ module.exports = NodeHelper.create({
     }
     this.loading = true
     this.log(Log.info, "Start loading album photos")
-    const page = 1
-    const size = 1000
     try {
-      await this.getAlbumDataAll(page, size, (p) => {
-        if (p === 1 && sendNotification) {
-          this.log(Log.debug, "Sending ready event")
-          this.getNextImage()
-        }
-      })
-      this.log(Log.info, "Got all album photos", this.albumData.DataList.length)
-    } catch (error) {
+      await this.getAlbumDataAll()
+	} catch (error) {
       this.log(Log.error, "Failed to load album photos", error)
     } finally {
       this.loading = false
@@ -154,7 +146,6 @@ module.exports = NodeHelper.create({
     this.config = config
     setTimeout(async () => {
       await this.gatherImageList(config, true)
-      this.getNextImage()
     }, 200)
   },
 
@@ -175,7 +166,7 @@ module.exports = NodeHelper.create({
       this.log(Log.info, "Album has not loaded yet")
       return
     }
-    if (!this.albumData.DataList || this.albumData.DataList.length === 0) {
+    if (!this.albumData.assets || this.albumData.assets.length === 0) {
       this.log(Log.info, "Album has no photos")
       return
     }
@@ -183,32 +174,72 @@ module.exports = NodeHelper.create({
     this.stopTimer()
 
     this.log(Log.info, "Getting the next image")
-    let info = null
-    const images = this.albumData.DataList
+    let asset = null
+    const images = this.albumData.assets
     do {
       const nextImage = Math.floor(Math.random() * images.length)
-      info = images[nextImage].FileItem
-    } while (this.hasShownBefore(info) || images.length <= HISTORY_MAX_SIZE)
-    this.sendImage(info)
-    this.pushHistory(info)
+      asset = images[nextImage]
+    } while (this.hasShownBefore(asset) || images.length <= HISTORY_MAX_SIZE)
+    this.sendImage(asset)
+    this.pushHistory(asset)
 
     this.restartTimer()
   },
 
-  sendImage(info) {
-    const u = new URL(this.config.host)
-    u.pathname = "/qumagie/p/api/thumb.php"
-    u.search = querystring.stringify({
-      m: "display",
-      t: "photo",
-      ac: info.code,
-      f: info.id
-    })
+// Check cache or fetch image
+	async fetchImage(assetId) {
+		const u = new URL(this.config.host)
+		u.pathname = "/api/assets/" + assetId + "/thumbnail"
+		u.search = querystring.stringify({
+			size: "preview"
+		})
 
-    const eventPayload = {
+	  const cacheFile = path.join(this.cacheDir, `${assetId}.b64`);
+
+		// Check if image is in cache
+		try {
+			const cachedData = await fs.readFile(cacheFile, "utf8");
+			this.log(Log.debug, `Serving ${assetId} from file cache`);
+			return cachedData;
+		} catch (error) {
+			if (error.code !== "ENOENT") {
+				this.log(Log.error, "Error reading cache:", error);
+			}
+		}
+
+		// Fetch from Immich API if not in cache
+		try {
+			const response = await fetch(u, {
+				headers: {
+					"x-api-key": this.config.api_key,
+				},
+			});
+
+			if (!response.ok) {
+				throw new Error(`HTTP error! Status: ${response.status}`);
+			}
+
+			const buffer = await response.arrayBuffer();
+			const base64Data = Buffer.from(buffer).toString('base64');
+
+// Store in file cache
+			await fs.writeFile(cacheFile, base64Data, 'utf8');
+			this.log(Log.debug, `Cached ${assetId} to file`);
+
+			return base64Data;
+		} catch (error) {
+			this.log(Log.error, "Error fetching image:", error);
+			this.sendSocketNotification("IMAGE_ERROR", { assetId, error: error.message });
+		}
+	},
+
+
+  async sendImage(asset) {
+	const data = await this.fetchImage(asset.id)
+	  const eventPayload = {
       identifier: this.config.identifier,
-      fileInfo: info,
-      url: u.toString()
+      asset: asset,
+      url: `data:image/jpeg;base64,${data}`,
     }
 
     this.log(Log.debug, "Sending payload", JSON.stringify(eventPayload))
